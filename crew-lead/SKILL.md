@@ -41,16 +41,22 @@ Score every task before launching it. **You** decide effort and review; the work
 | **Blast radius:** what breaks if it's wrong? | nothing (docs, analysis) | code behind review/tests | live/production systems, user or customer data, money, security, schema or migrations |
 | **Reasoning:** how much judgment is needed? | follow clear steps | some tradeoffs | open-ended diagnosis or architecture |
 
-**Effort** (by total score):
+**Effort** (by Difficulty + Reasoning only; Blast radius picks the review, not the effort):
 
-| Total | Effort |
+| Difficulty + Reasoning | Effort |
 |---|---|
-| 0–1 | medium |
-| 2–4 | high (the default for builders) |
-| 5–6 | xhigh |
+| 0–2 | medium (the default for builders) |
+| 3–4 | high |
 
-Any task with Blast radius 2 gets at least high. Never use low for anything that writes to live
-systems or data.
+Effort buys thinking, so it follows how hard the thinking is. Risk is handled by review and
+tests: Blast radius sets the review plan below and stays out of this sum.
+- A normal fix or feature from a written plan or brief is Difficulty 1, Reasoning 0–1: medium.
+- **xhigh is not for builders**: they fill their context before finishing. Use it only for a
+  plan or diagnosis task that scores 4 and whose output is a plan or a finding, not code.
+- **Floor:** a worker that itself acts on a live system (a deploy, a migration, a phone or
+  account change) gets at least high. Nothing reviews its action before it lands.
+- If a medium builder's reviews keep finding serious defects for a kind of task, raise that kind
+  to high.
 
 **Review plan** (by Blast radius):
 
@@ -78,6 +84,15 @@ The brief contains:
   contract.
 - **Effort and review plan** from the scorecard, with the reviewer launch command.
 - **Evidence** you already have (logs, counts, file:line), so the worker doesn't redo your research.
+- **Tests where they earn their place (builders; Matt 2026-10-08, replaces the blanket tests-first rule):**
+  a test is REQUIRED for a bug fix (reproduce it from real evidence: a saved screen, log line or database row; the
+  report shows it failing, then passing), for logic where accounts, data or money are at risk, and for behaviour
+  another part of the system depends on; it ships in the same PR. NOT required where it would only restate the code
+  (wording, layout, simple wiring): the builder writes "no test, because ..." and you judge it. Test from the
+  outside; expected values come from the spec or captured real data, never from re-running the code; fake only the
+  outside world, never our own modules. Never weaken, skip or delete an existing test to get green: a real behaviour
+  change edits the test in the same PR with the reason, and you judge it (lazy? real change? avoidable?) before
+  merging. Where a project proves something on real hardware instead (a canary run), say so in the brief.
 - **Rules:** project safety rules (point to the file), no merge/deploy unless you say so, and
   git hygiene (own branch, small commits, clean tree, open a PR).
 - **Context:** follow `context-relay` (hand off near 370k, hard cap 500k).
@@ -117,11 +132,17 @@ orca orchestration task-create --spec "Read your full brief: <path>" --task-titl
 orca orchestration dispatch --task <task_id> --to <h> --inject --json
 ```
 
+- **Codex WORKERS: the `<codex command>` is plain `codex --model <model> -c model_reasoning_effort=<effort>`,
+  with NO `--sandbox` flag.** Orca's Codex config already gives full access; a `--sandbox workspace-write`
+  override wins over that config and blocks the `orca` CLI, so the worker cannot send `ask` or `worker_done`
+  (seen 2026-10-05: work finished, report never arrived). The `--sandbox workspace-write` in the reviewer recipe
+  below is for reviewers only: they answer in a file and never call `orca`.
 - The worker then gets its IDs and uses `ask` and `worker_done` like any other worker.
 - Orca lists this worker as "unsupervised", so `worker-stop`/`worker-release` don't apply. Close
   it with `orca terminal close` after it settles.
 - Codex's footer shows `Context N% used`; rotate it per `context-relay`.
-- The reviewer model comes from the user's global instructions (CLAUDE.md/AGENTS.md). Orca terminals
+- The reviewer model, effort and speed come from the user's global instructions (CLAUDE.md/AGENTS.md;
+  2026-10-14: gpt-6-astra, high, fast: `-c service_tier=fast`, which uses more of the Codex allowance). Orca terminals
   already run Codex on Orca's active account.
   - If Codex says the model is "not supported", the active account's plan lacks it: switch
     accounts (`orca account list`).
@@ -131,7 +152,7 @@ it in the builder's worktree:
 
 ```text
 orca terminal split --terminal "$ORCA_TERMINAL_HANDLE" --direction vertical \
-  --command 'codex --model <reviewer model> -c model_reasoning_effort=<effort> --sandbox workspace-write' --json
+  --command 'codex --model <reviewer model> -c model_reasoning_effort=<reviewer effort> -c service_tier=fast --sandbox workspace-write' --json
 # reviewer handle = result.split.handle
 orca terminal read --terminal <h> --limit 40
 # repeat the read every few seconds until you see the "›" prompt; `wait --for tui-idle` times out on Codex
@@ -146,7 +167,7 @@ orca terminal send --terminal <h> --text "Read and follow: <prompt file>" ; orca
 - On REVISE, fix and send "Re-review: <what changed>" to the same pane, so it keeps its memory.
 - On APPROVED, `orca terminal close --terminal <h>`.
 - `codex exec` from a shell is only a fallback when `$ORCA_TERMINAL_HANDLE` is unset (outside
-  Orca): prefix `CODEX_HOME="$ORCA_CODEX_HOME"`, add `-o <out.txt>`, and close stdin with `< /dev/null`, or it hangs.
+  Orca): prefix `CODEX_HOME="$ORCA_CODEX_HOME"`, pass the same `-c` model, effort and `service_tier=fast` flags, add `-o <out.txt>`, and close stdin with `< /dev/null`, or it hangs.
 
 ## Watch loop (never let it lapse)
 
@@ -206,6 +227,9 @@ so your successor inherits only live work. Your handoff note adds:
   Terminal handles only live as long as the terminal; the IDs and worktree names persist;
 - open user decisions;
 - standing approvals (quoted).
+
+Launch your successor with your real launch command copied from the process list, permission
+flag included (`context-relay` step 3); the takeover prompt tells it to state its permission mode.
 
 Your successor starts in your worktree, runs `run-use`, re-arms the wait loop and confirms. You
 stop once it confirms, and it closes your terminal.

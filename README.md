@@ -10,12 +10,15 @@ into your `~/.claude/skills/` (or your agent's skills directory) to use it.
 | [`crew-lead`](crew-lead/) | Run a crew of coding agents from one lead session — plan, score, brief, launch, watch, review, hand off. |
 | [`context-relay`](context-relay/) | Hand off to a fresh successor agent before a session's context passes its token cap. Includes a Claude Code hook script. |
 | [`nuisance-trip`](nuisance-trip/) | Stop adding safety checks that fail when nothing is actually wrong. |
+| [`crew-board`](crew-board/) | Add-on to crew-lead: every piece of the user's work becomes a numbered task in a durable store, with decisions, results and a Tasks board the user steers from. Needs the `tasks` CLI and the crew-board Claude Code mod (not in this repo yet). |
 
 ## Install
 
 ```sh
 git clone https://github.com/Westy8/westys-skills.git
 cp -R westys-skills/crew-lead westys-skills/context-relay westys-skills/nuisance-trip ~/.claude/skills/
+# crew-board too, once you have the `tasks` CLI and the board mod:
+cp -R westys-skills/crew-board ~/.claude/skills/
 ```
 
 ## Enabling the context-relay hook

@@ -36,7 +36,11 @@ nothing to do.
    CLAUDE.md/AGENTS.md). If it has none, use a `docs/handoff/` file on your own branch, or the
    scratchpad path your orchestrator gave you. Commit it if it lives in the repo.
 3. **Start the successor** in the same worktree with the same agent, model and effort you were
-   launched with.
+   launched with. **Never retype the launch command from memory.** Copy your real one from the
+   process list (walk up from `$PPID` with `ps -o pid=,ppid=,command= -p <pid>` to the
+   `claude`/`codex` process) and reuse its flags verbatim, permission flag, model and effort
+   included. If yours has no permission flag but your Orca-launched workers do, use theirs. A
+   successor without it runs in auto mode and cannot merge or edit skills (2026-10-07).
    - With Orca, open it in a vertical split beside you, in the same worktree:
      `orca terminal split --terminal "$ORCA_TERMINAL_HANDLE" --direction vertical --command '<your launch command>' --json`.
      Capture the successor's handle (`result.split.handle`) and

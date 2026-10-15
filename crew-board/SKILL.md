@@ -38,6 +38,8 @@ get IDs like `IGR-3.D2`.
    everything open now. That covers each piece of work in progress, each question the user still owes you,
    and anything finished since his last message. Do it before you answer him, so the very first recap
    already uses IDs.
+4. **Tidy the board** (below) once, before your first reply to him. A handoff's "next steps" cover what the former
+   lead was busy with; the tidy-up covers everything else on the board.
 
 ## Messages from the Tasks board
 
@@ -74,14 +76,17 @@ tasks set IGR-4 --done "<one-line headline>"
 The newest report is what the Result tab shows, and every file path in it can be clicked open. A
 result that only exists in chat never reaches the Result tab.
 
-**Progress.** When you plan a task, set its stage and step count from your own plan; move them as
-each step is verified (never inflate them, never count a step before it is checked):
+**Progress.** This is the only way the board tracks progress: a task shows a progress bar only when
+you have set its steps, and its stage word only when you have set a stage. Whenever you plan a task,
+set `--stage` and `--steps` from your own plan; whenever you advance it (a step verified, a new
+stage), move them in the same breath. Never inflate them, and never count a step before it is checked:
 
 ```
 tasks set IGR-4 --stage development --steps 2/5 --step-label "Generating (Kling)"
 ```
 
-Stages: planning, development, review, testing, done.
+Stages: planning, development, review, testing, done. A task you have not planned yet shows no bar
+at all, so plan it (or at least set its stage) as soon as you start work on it.
 
 **Asking him things.** In a mod session, the AskUserQuestion tool no longer blocks you: each question
 is posted to his board as a decision with buttons (put "(Recommended)" at the end of the option you
@@ -151,8 +156,8 @@ Use exactly these, because "done" used to mean five different things:
 | pr-open | PR is up, not merged |
 | merged-not-live | Merged, but not deployed, installed or restarted yet |
 | live | Running for real (say where in `--done`) |
-| proven | Live and a real run showed it works |
-| done | Finished: nothing more to do |
+| proven | Live and a real run showed it works, with something still to follow up (say what in `--next`) |
+| done | Finished: nothing more to do (a live or proven task with an empty `--next` is done) |
 | dropped | Stopped on purpose; give the reason in `--done` |
 
 ## Decisions
@@ -171,6 +176,34 @@ tasks ask IGR-3 "Merge the Kling queue now?" --option "Merge now" --option "Wait
 - If a decision stops mattering, close it with `tasks answer <id> "<why>" --state superseded`. If you
   proceed without an answer, record it with `--state defaulted` and say so. Never let a decision
   silently disappear.
+- A task reaching `proven`, `done` or `dropped` closes its open decisions as superseded and prints each one. If one
+  still matters, ask it again.
+- **Only ask what only he can answer.** Before a `tasks ask`, check what you can check yourself (an account's status,
+  a file, a log): RED-20 asked him to re-assign 7 accounts that had been dead since July. An optional check ("if you
+  have a minute…") is not a decision: put it in your reply, so it never sits in his Needs you list.
+
+## Tidy the board
+
+Run it when you take over, and whenever he asks what's open, where things stand, or to update the board. It costs one
+pass over `tasks list`, not a check every turn. For each open task:
+
+- **Its agents.** Read each linked agent's screen (`orca terminal read --terminal <h> --screen`). A worker waiting on
+  a question for him becomes a decision on its task (`tasks ask`). A finished worker's result goes on the task. Agents
+  he talks to directly count too: what they found or asked belongs in the store. A link that isn't a full
+  `term_…` handle won't read: find a `ctx_…` dispatch's terminal in `orca orchestration worker-list` and a short
+  `term_…` prefix in `orca terminal list`, then re-link it with the full handle.
+- **Finished work retires.** A `live` or `proven` task with nothing left to do becomes `done` (`tasks set <ID>
+  --status done`). Its open decisions close by themselves, and the command prints each one it closed (on stderr, so
+  it still shows when you send the output to /dev/null).
+- **Asks of him are decisions.** "Matt's verdict", "Matt logs in once" written only in `--next` never reach his Needs
+  you list. Make each one a `tasks ask`, set `blocked-on-matt` for a chore with no options, or drop it if it no longer
+  matters.
+- **Promises have something behind them.** A `--next` like "watch for the first stall" needs a timer, a wait or a
+  worker that does it. If none does, set one up or reword the line to what is really true.
+- **Stale tasks.** A task the handoff calls stale, or that nobody owns, gets confirmed with its next step or dropped
+  with the reason in `--done`.
+
+Change only what is wrong. If the board was already right, say nothing about the tidy-up.
 
 ## How to talk to him
 
@@ -178,8 +211,8 @@ tasks ask IGR-3 "Merge the Kling queue now?" --option "Merge now" --option "Wait
   worker still running) gets no chat message. Speak only when something finished, failed, changed on a
   live system, or needs him. Long runs of "nothing new" buried the one action he owed.
 - **Tag what you report** with the task ID and title: `IGR-3 Kling two-at-once: PR #17 is up, tests pass.`
-- **Recaps.** When he asks what's open, what happened, or what you need from him, run `tasks list`
-  (add `--all` for every repo) and answer in this shape. Keep it short: he has asked for "a recap of
+- **Recaps.** When he asks what's open, what happened, or what you need from him, tidy the board (above), run
+  `tasks list` (add `--all` for every repo) and answer in this shape. Keep it short: he has asked for "a recap of
   the recap" when recaps ran long.
 
   ```
@@ -193,8 +226,8 @@ tasks ask IGR-3 "Merge the Kling queue now?" --option "Merge now" --option "Wait
 
 ## Your relay
 
-Before handing off, make sure the store is current: every open request from him is a task, every
-open question is a decision, and every result is noted. Then the handoff note can simply say "open
+Before handing off, tidy the board (above) and make sure the store is current: every open request from him is a
+task, every open question is a decision, and every result is noted. Then the handoff note can simply say "open
 work: `tasks list`" next to crew-lead's worker table. A request he made while you were relaying goes
 into the store *before* you stop, so the successor can't drop it.
 

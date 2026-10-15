@@ -66,11 +66,12 @@ prompt with an envelope:
   `tasks say IGR-4 "…"`, because no board message started that turn.
 
 **Results he can read.** Write the full findings to a markdown file (headings, lists and tables all
-render; put record lists in a CSV next to it), then:
+render; put record lists in a CSV next to it). Start it with `## In short`: 3 to 5 plain bullets, no
+jargon, the answer first. The Result tab shows those bullets first, the details below. Then:
 
 ```
 tasks link IGR-4 report /abs/path/report.md
-tasks set IGR-4 --done "<one-line headline>"
+tasks set IGR-4 --done "<one plain sentence>"
 ```
 
 The newest report is what the Result tab shows, and every file path in it can be clicked open. A
@@ -132,7 +133,8 @@ tasks link IGR-3 agent term_ab12 --label "codex · gpt-6-astra · xhigh · revie
 - **Link PRs as `owner/repo#N`** (or the PR's URL). The board then shows Orca-style state and checks for it;
   a bare `#N` shows only the number.
 
-- `--done` and `--next` replace the old text, so write them as the current state, not a diff.
+- `--done` and `--next` replace the old text, so write them as the current state, not a diff. `--done` is
+  one plain sentence: the board shows it when a report has no In short.
 - **Results** go in as `--kind result` *and* into your reply. A result that lives only in a file
   never reached him.
 - **Calls you made on his behalf** (defaults, scope changes, picking one design over another) go in as
@@ -211,6 +213,8 @@ Change only what is wrong. If the board was already right, say nothing about the
   worker still running) gets no chat message. Speak only when something finished, failed, changed on a
   live system, or needs him. Long runs of "nothing new" buried the one action he owed.
 - **Tag what you report** with the task ID and title: `IGR-3 Kling two-at-once: PR #17 is up, tests pass.`
+- **Short replies.** Lead with the answer in a few lines; the details live in the report. He finds long
+  replies too much to read.
 - **Recaps.** When he asks what's open, what happened, or what you need from him, tidy the board (above), run
   `tasks list` (add `--all` for every repo) and answer in this shape. Keep it short: he has asked for "a recap of
   the recap" when recaps ran long.

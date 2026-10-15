@@ -162,6 +162,8 @@ Use exactly these, because "done" used to mean five different things:
 | done | Finished: nothing more to do (a live or proven task with an empty `--next` is done) |
 | dropped | Stopped on purpose; give the reason in `--done` |
 
+A task Matt closes on the board (done text "Marked done by Matt on the board" or "Closed by Matt on the board") is closed: stop its work and don't reopen it unless he asks.
+
 ## Decisions
 
 ```

@@ -1,0 +1,5 @@
+{
+  "name": "crew",
+  "version": "1.0.0",
+  "description": "Run a crew of coding agents from one lead session: crew-lead, context-relay (with its hand-off hook), crew-board (with the `tasks` CLI and its prompt hook) and nuisance-trip."
+}

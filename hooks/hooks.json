@@ -1,0 +1,15 @@
+{
+  "hooks": {
+    "UserPromptSubmit": [
+      { "hooks": [
+        { "type": "command", "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/skills/context-relay/scripts/context_check.py\"", "timeout": 10 },
+        { "type": "command", "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/mod/crew-board/tasks.py\" hook", "timeout": 10 }
+      ] }
+    ],
+    "PostToolUse": [
+      { "hooks": [
+        { "type": "command", "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/skills/context-relay/scripts/context_check.py\"", "timeout": 10 }
+      ] }
+    ]
+  }
+}

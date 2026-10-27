@@ -1,0 +1,9 @@
+{
+  "name": "westys-skills",
+  "description": "Skills and a board mod for running coding agents.",
+  "owner": { "name": "Westy8" },
+  "plugins": [
+    { "name": "crew", "source": "./" },
+    { "name": "crew-board", "source": "./mod/crew-board" }
+  ]
+}

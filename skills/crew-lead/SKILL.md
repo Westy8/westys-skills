@@ -84,7 +84,7 @@ The brief contains:
   contract.
 - **Effort and review plan** from the scorecard, with the reviewer launch command.
 - **Evidence** you already have (logs, counts, file:line), so the worker doesn't redo your research.
-- **Tests where they earn their place (builders; Matt 2026-10-08, replaces the blanket tests-first rule):**
+- **Tests where they earn their place (builders; the user 2026-10-08, replaces the blanket tests-first rule):**
   a test is REQUIRED for a bug fix (reproduce it from real evidence: a saved screen, log line or database row; the
   report shows it failing, then passing), for logic where accounts, data or money are at risk, and for behaviour
   another part of the system depends on; it ships in the same PR. NOT required where it would only restate the code

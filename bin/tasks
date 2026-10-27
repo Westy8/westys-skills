@@ -1,0 +1,3 @@
+#!/bin/sh
+# `tasks` on the Bash tool's PATH: the crew-board store CLI that ships inside the board mod.
+exec python3 "$(dirname "$0")/../mod/crew-board/tasks.py" "$@"

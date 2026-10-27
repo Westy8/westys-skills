@@ -1,0 +1,6 @@
+{
+  "name": "crew-board",
+  "version": "0.2.0",
+  "description": "Tasks board for crew leads: every repo's tasks, results, decisions and conversations in a pane; the lead's session takes the user's messages as prompts.",
+  "types": "./types/index.d.ts"
+}

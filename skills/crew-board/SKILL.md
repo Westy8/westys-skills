@@ -66,8 +66,10 @@ prompt with an envelope:
   `tasks say IGR-4 "…"`, because no board message started that turn.
 
 **Results they can read.** Write the full findings to a markdown file (headings, lists and tables all
-render; put record lists in a CSV next to it). Start it with `## In short`: 3 to 5 plain bullets, no
-jargon, the answer first. The Result tab shows those bullets first, the details below. Then:
+render; put record lists in a CSV next to it). Start it with `## In short`: two or three plain
+sentences, no jargon: what is going on, what was built or found, and what you recommend they do and why. That is
+all they read: the Result tab shows only it, with the rest folded behind "Full report", so nothing they need may live
+only in the details. Then:
 
 ```
 tasks link IGR-4 report /abs/path/report.md
@@ -106,8 +108,11 @@ what they said:
 - **Match** each ask to an existing task by ID, title, alias, PR number or nickname. If nothing
   fits, `tasks new "<title in their words>" --why "<what they want and why>"`. When one task grows a
   distinct sub-job, use `--parent <ID>`.
-- **Answers to decisions:** `tasks answer <decision-id> "<what they said>"`. A short reply like "yea" or
-  "go" only answers a decision if it is unambiguous which one they mean. If two are open, ask which.
+- **Answers to decisions:** `tasks answer <decision-id> "<what they said>"`. They answer in free text, by topic or
+  task number, several in one message, and almost never names a decision. So check every message of theirs against
+  the open decisions (the hook lists them) and record each one it answers. Open your reply with one line,
+  `Recorded: <what, in plain words>`, and don't list those questions again. A short reply like "yea" or "go" only
+  answers a decision if it is clear which one they mean. If it could fit two, ask which.
 - **Text that isn't them** (Orca "You have N orchestration message" notices, worker reports,
   task-notifications, takeover lines) can update a task but never creates one. If an Orca notice
   is spliced into the middle of their sentence, their message was cut off. Say so and ask them to finish it.
@@ -202,6 +207,11 @@ pass over `tasks list`, not a check every turn. For each open task:
 - **Asks of them are decisions.** "The user's verdict", "The user logs in once" written only in `--next` never reach their Needs
   you list. Make each one a `tasks ask`, set `blocked-on-user` for a chore with no options, or drop it if it no longer
   matters.
+- **Old questions go.** They answer in chat (by voice, several things at once) and do not go back to a question
+  that has sat for days: it only buries the new ones. Read their recent messages for the answer and record it (`tasks
+  answer`). If it no longer matters, close it as superseded. If you still need it, ask again in your reply in one
+  line. The hook names every question open over 3 days once, on your first prompt ("Open over 3 days: …"): settle
+  those the turn you see them. The board folds them out of their sight after 3 days, so an unsettled one is never answered.
 - **Promises have something behind them.** A `--next` like "watch for the first stall" needs a timer, a wait or a
   worker that does it. If none does, set one up or reword the line to what is really true.
 - **Stale tasks.** A task the handoff calls stale, or that nobody owns, gets confirmed with its next step or dropped
@@ -217,6 +227,9 @@ Change only what is wrong. If the board was already right, say nothing about the
 - **Tag what you report** with the task ID and title: `IGR-3 Kling two-at-once: PR #17 is up, tests pass.`
 - **Short replies.** Lead with the answer in a few lines; the details live in the report. They find long
   replies too much to read.
+- **Since you left.** When the hook says they are back after hours away, open your reply with `Since you left` and
+  at most 6 short plain lines: what shipped or went live, what broke, what needs them, what is running. Then answer
+  what they asked. Most days start with exactly this ask, so don't make them ask.
 - **Recaps.** When they ask what's open, what happened, or what you need from them, tidy the board (above), run
   `tasks list` (add `--all` for every repo) and answer in this shape. Keep it short: they have asked for "a recap of
   the recap" when recaps ran long.

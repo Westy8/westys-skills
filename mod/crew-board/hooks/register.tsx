@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
 import type { Register } from 'claude-code'
 
-import { cleared, leadTick, openPane, poll, tasks } from './board'
+import { beat, cleared, leadTick, openPane, poll, tasks } from './board'
 import { askArgs, DUR, envelopeId, postedNote } from './logic'
 import { initMotion, moving, paneClosed, start, syncSpinner } from './motion'
 import { loadTheme } from './theme'
@@ -16,7 +16,7 @@ const sent = atom({ plugin: 'crew-board', key: 'sent' } as const, [] as number[]
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     if (!e.isInteractive) return next(e) // -p / SDK: nobody reads the board, and it must never take the user's messages
-    $.clock.every(3000, () => void poll($))
+    $.clock.every(3000, () => void beat($))
     void poll($)
     await initMotion($).catch(err => $.ui.log(`motion: ${(err as Error).message ?? err}`, { to: 'debug' }))
     await loadTheme($).catch(() => undefined) // Default until it loads
@@ -65,6 +65,7 @@ export const register: Register = on => {
     if (e.agentId) return next(e)
     await update($, working, () => false)
     await syncSpinner($)
+    void poll($) // a turn may have run `tasks lead`: a session on the slow beat learns it is the lead now, not 15 s on
     if ((await read($, turns)).includes(e.turnId) && e.answer.trim() && !e.isAborted) {
       await tasks($, ['turn-complete', '--turn', e.turnId], e.answer)
       await update($, turns, list => list.filter(x => x !== e.turnId))

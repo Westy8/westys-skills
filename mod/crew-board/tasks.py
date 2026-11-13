@@ -8,6 +8,7 @@ Store: $TASKS_DB or ~/.tasks/tasks.db.
 import argparse, hashlib, json, os, re, shlex, sqlite3, subprocess, sys, time
 
 DB = os.environ.get("TASKS_DB") or os.path.expanduser("~/.tasks/tasks.db")
+LEAD_MODEL = "claude-fable-5-2"  # the model every crew lead started from the board runs on
 STATUSES = ["proposed", "running", "blocked-on-user", "blocked", "in-review", "pr-open",
             "merged-not-live", "live", "proven", "done", "dropped"]
 CLOSED = ("done", "dropped")
@@ -46,6 +47,8 @@ STUCK = 30  # seconds in 'sending' (since sent_at): a healthy send leaves it wit
 RANK_SQL = "CASE state " + " ".join(f"WHEN '{k}' THEN {v}" for k, v in RANK.items()) + " ELSE 0 END"
 ENVELOPE = re.compile(r"\[([A-Z][A-Z0-9]*-\d+) · m(\d+)\]")
 LEADING = re.compile(r"\s*\[([A-Z][A-Z0-9]*-\d+) · m(\d+)\]")  # the delivery envelope; quoted ones in the body are text
+STALE = 3 * 86400  # a question open this long is one the user won't come back to: the hook has the lead settle it
+AWAY = 4 * 3600  # the user's first message after this long away gets a "Since you left" digest
 HOLD = 300  # seconds a finished task stays among the open ones after a board first showed it to the user (TAS-21)
 LEAD_FRESH = 20  # seconds: a lead mod reports every ~3 s, so older means no lead is running
 ORCA_DATA = os.environ.get("TASKS_ORCA_DATA") or os.path.expanduser("~/Library/Application Support/orca/profiles/local-default/orca-data.json")
@@ -240,7 +243,7 @@ def task_line(c, t):
 
 def open_decisions(c, repo=None):
     q = ("SELECT d.* FROM decisions d JOIN tasks t ON t.id=d.task_id WHERE d.state='open'"
-         + (" AND t.repo=?" if repo else "") + " ORDER BY d.created")
+         + (" AND t.repo=?" if repo else "") + " ORDER BY d.created DESC")  # newest first: what the user was just asked
     return c.execute(q, (repo,) if repo else ()).fetchall()
 
 
@@ -502,7 +505,7 @@ def cmd_start_lead(c, a):
     c.commit()  # never hold the store across the launch: every board polls it
     brief = os.path.join(os.path.dirname(DB), "starts", f"{repo}.md")
     # the launched Claude's shell is the user's login shell: a store other than the default goes with it
-    cmd = (f"TASKS_DB={shlex.quote(DB)} " if os.environ.get("TASKS_DB") else "") + "claude --dangerously-skip-permissions" \
+    cmd = (f"TASKS_DB={shlex.quote(DB)} " if os.environ.get("TASKS_DB") else "") + f"claude --dangerously-skip-permissions --model {LEAD_MODEL}" \
         + (f" --resume {shlex.quote(session)}" if session else "") + " " + shlex.quote(f"Read and follow: {brief}")
     argv = ["orca", "terminal", "create", "--worktree", f"path:{where}", "--title", f"{repo} lead", "--command", cmd, "--json"]
     try:
@@ -707,13 +710,34 @@ def orca_repos():
     return {os.path.basename(r.get("path", "").rstrip("/")): r for r in repos if r.get("path")}
 
 
-def card(c, t):
-    ds = c.execute("SELECT COUNT(*) FROM decisions WHERE task_id=? AND state='open'", (t["id"],)).fetchone()[0]
-    rep = report_of(c, t["id"])
+def card_facts(c):
+    """What every card needs from other tables, read once for the whole board (it was four queries per task, and every
+    open Claude session draws the board every few seconds)."""
+    links = {}
+    for l in c.execute("SELECT task_id, kind, ref, label FROM links WHERE kind IN ('agent','pr') ORDER BY task_id, kind, ref"):
+        links.setdefault((l["task_id"], l["kind"]), []).append({"ref": l["ref"], "label": l["label"]})
+    return {"ds": dict(c.execute("SELECT task_id, COUNT(*) FROM decisions WHERE state='open' GROUP BY task_id").fetchall()),
+            # the newest report last, so it is the one kept (as report_of)
+            "rep": dict(c.execute("SELECT l.task_id, l.ref FROM links l LEFT JOIN files f ON f.path=l.ref "
+                                  "WHERE l.kind='report' ORDER BY f.ts").fetchall()),
+            "rep_ts": dict(c.execute("SELECT task_id, MAX(ts) FROM events WHERE kind='result' AND text GLOB 'report: *' "
+                                     "GROUP BY task_id").fetchall()),
+            "links": links}
+
+
+def card(c, t, facts=None):
+    if facts:
+        ds, rep, rep_ts = facts["ds"].get(t["id"], 0), facts["rep"].get(t["id"]), facts["rep_ts"].get(t["id"])
+        links = {k + "s": facts["links"].get((t["id"], k), []) for k in ("agent", "pr")}
+    else:
+        ds = c.execute("SELECT COUNT(*) FROM decisions WHERE task_id=? AND state='open'", (t["id"],)).fetchone()[0]
+        rep = report_of(c, t["id"])
+        rep_ts = rep and c.execute("SELECT MAX(ts) FROM events WHERE task_id=? AND kind='result' AND text GLOB 'report: *'",
+                                   (t["id"],)).fetchone()[0]
+        links = {k + "s": [{"ref": l["ref"], "label": l["label"]} for l in c.execute(
+            "SELECT ref, label FROM links WHERE task_id=? AND kind=?", (t["id"], k))] for k in ("agent", "pr")}
     # "Result ready" means a report the user hasn't opened yet: linked (or relinked) after they last viewed its Result tab
     # (this task's own report events: a file's registration time is shared by every task that links that path)
-    rep_ts = rep and c.execute("SELECT MAX(ts) FROM events WHERE task_id=? AND kind='result' AND text GLOB 'report: *'",
-                               (t["id"],)).fetchone()[0]
     return {"id": t["id"], "repo": t["repo"], "title": t["title"], "status": t["status"], "stage": t["stage"],
             "steps_done": t["steps_done"] or 0, "steps_total": t["steps_total"] or 0, "step_label": t["step_label"] or "",
             "summary": t["done"] or t["next"] or t["why"] or "", "next": t["next"], "needs_you": bool(ds) or t["status"] == "blocked-on-user",
@@ -722,8 +746,7 @@ def card(c, t):
             # finished, and a board hasn't shown it to the user yet (or did so only HOLD seconds ago): it stays among the open
             "just_done": t["status"] in CLOSED and (t["finished"] or 0) > 0
             and ((t["finish_seen"] or 0) < t["finished"] or time.time() - t["finish_seen"] < HOLD),
-            **{k + "s": [{"ref": l["ref"], "label": l["label"]} for l in c.execute(
-                "SELECT ref, label FROM links WHERE task_id=? AND kind=?", (t["id"], k))] for k in ("agent", "pr")}}
+            **links}
 
 
 def report_of(c, tid):
@@ -746,7 +769,8 @@ def board(c):
         repos.append({"repo": r["repo"], "prefix": r["prefix"], "enabled": bool(r["enabled"]),
                       "display_name": o.get("displayName") or r["repo"], "badge_color": o.get("badgeColor"),
                       "lead": lead_state(c, r["repo"])})
-    tasks = [card(c, t) for t in c.execute("SELECT * FROM tasks ORDER BY updated DESC")]
+    facts = card_facts(c)
+    tasks = [card(c, t, facts) for t in c.execute("SELECT * FROM tasks ORDER BY updated DESC").fetchall()]
     return {"repos": repos, "tasks": tasks, "decisions": [decision_json(d) for d in open_decisions(c)], "updated": time.time()}
 
 
@@ -883,8 +907,14 @@ def cmd_board(c, a):
 
 def cmd_mod_tick(c, a):
     """One poll from a Tasks pane: who am I, the board, the open task, and (lead only) this repo's queued messages, claimed."""
-    c.execute("BEGIN IMMEDIATE")  # admission, key writes and claims in one write transaction
     repo = repo_of(a.cwd)
+    # Admission, key writes and claims in one write transaction, taken only by a tick that can write: the registered
+    # lead's terminal or a pane marking something seen. Every other open session
+    # (a worker, another repo's pane) only reads. With ~25 sessions each holding the write lock for a whole board build
+    # every 3 s, they queued past the 5 s timeout: the board froze and `tasks` commands failed "database is locked".
+    l = lead_row(c, repo)
+    writing = bool(a.seen or a.seen_done or (l and (not l["terminal"] or l["terminal"] == a.terminal)))
+    c.execute("BEGIN IMMEDIATE" if writing else "BEGIN")  # a reader still sees one snapshot of the board
     r = c.execute("SELECT * FROM repos WHERE repo=?", (repo,)).fetchone()
     l = lead_row(c, repo)
     # The lead is a registered conversation in the registered terminal (outside Orca: none registered). It is known by
@@ -895,7 +925,8 @@ def cmd_mod_tick(c, a):
         c.execute("SELECT 1 FROM lead_sessions WHERE repo=? AND key=?", (repo, k)).fetchone() for k in keys)
     is_lead = bool(r and r["enabled"] and l and (not l["terminal"] or l["terminal"] == a.terminal) and known)
     # A message submitted by a Claude that has since ended never starts its turn (measured): offer Resend.
-    for m in c.execute("SELECT id, sent_pid, sent_start FROM messages WHERE state='accepted' AND sent_pid>0").fetchall():
+    # (checked by writing ticks only: a lead's terminal ticks every 3 s, and one reaper is enough)
+    for m in c.execute("SELECT id, sent_pid, sent_start FROM messages WHERE state='accepted' AND sent_pid>0").fetchall() if writing else ():
         if sender_gone(m["sent_pid"], m["sent_start"]):
             raise_state(c, [m["id"]], "failed", "The lead's Claude closed before it read this. Resend to send it again.")
     claimed, reopen = [], ""
@@ -919,11 +950,15 @@ def cmd_mod_tick(c, a):
             if c.execute("UPDATE messages SET state='sending', state_note='', sent_at=?, sent_pid=?, sent_start=?, sent_session=? "
                          "WHERE id=? AND state IN ('queued','held')", (time.time(), a.pid, start, a.session, m["id"])).rowcount:
                 claimed.append(msg_json(c, c.execute("SELECT * FROM messages WHERE id=?", (m["id"],)).fetchone()))
+    if not claimed:  # the board is only read: built outside the write lock. A claim still commits with its answer
+        c.commit()   # built, so a failed build never strands a claimed message.
+        c.execute("BEGIN")
     res = {"me": {"repo": repo, "enabled": bool(r and r["enabled"]), "is_lead": is_lead}, "claimed": claimed, "board": board(c)}
     if is_lead and reopen:
         res["me"]["reopen"] = reopen
     if a.open:
         res["task"] = detail(c, a.open, a.more, a.from_message, a.from_event) if c.execute("SELECT 1 FROM tasks WHERE id=?", (a.open.upper(),)).fetchone() else None
+    c.commit()  # before the answer is written: a reader slow to take it must never hold the store
     print(json.dumps(res))
 
 
@@ -943,6 +978,14 @@ def is_crew_lead(c, ev, repo):
         return re.search(rb'"skill":"(crew:)?crew-lead"|<command-name>/(crew:)?crew-lead</command-name>', data) is not None
     except (OSError, KeyError):
         return False
+
+
+def own_words(prompt):
+    """Whether a prompt looks like the user's own words rather than a notice, a worker report or a takeover line. A guess:
+    it only times their absence and words two hints, and each hint tells the lead to apply it only if the words are theirs."""
+    p = prompt.lstrip()
+    return bool(p) and not p.startswith(("<", "You have ", "[Request interrupted", "This session is being continued")) \
+        and "Dispatch ID" not in p and "worker_done" not in p and "orchestration message" not in p[:300]
 
 
 def cmd_hook(c, a):
@@ -969,19 +1012,68 @@ def cmd_hook(c, a):
                     "crew lead (you coordinate the workers and talk to the user), run `tasks lead` now, then follow the crew-board "
                     "skill. If you are a worker or a reviewer, ignore this.")
             return print(json.dumps({"hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "additionalContext": hint}}))
-        tasks = c.execute(f"SELECT * FROM tasks WHERE repo=? AND status NOT IN {CLOSED} ORDER BY created", (repo,)).fetchall()
-        lines = [f"crew-board is ON for repo '{repo}'. Follow the crew-board skill (if it isn't loaded, load it now).",
-                 "Open tasks:" if tasks else "No open tasks yet. If work is already in flight, file it now (crew-board: When you start, step 3)."]
-        lines += ["- " + task_line(c, t) for t in tasks]
+        tasks = c.execute(f"SELECT * FROM tasks WHERE repo=? AND status NOT IN {CLOSED} ORDER BY updated DESC", (repo,)).fetchall()
+        lines = [f"crew-board is ON for repo '{repo}'. Follow the crew-board skill (if it isn't loaded, load it now)."]
+        # Decisions and board messages first, so the size cap can only ever cut tasks.
         ds = open_decisions(c, repo)
         if ds:
             lines += ["Decisions waiting on the user:"] + ["- " + decision_line(d) for d in ds]
+        if own_words(ev.get("prompt", "")):
+            if ds:  # they answer in free text, several at once, never by decision ID
+                lines.append("If this prompt is the user's own words, first check it against the decisions above: they answer by "
+                             "topic or task number, several in one message, never by decision ID. Record each one it answers "
+                             "(`tasks answer <id> \"<their words>\"`), open your reply with one line `Recorded: <what, in plain "
+                             "words>`, and don't list those again. Ask which they mean only if it could fit two.")
+            last_path = os.path.join(os.path.dirname(DB), "user-last", re.sub(r"[^\w-]", "_", repo))
+            try:
+                gap = time.time() - os.path.getmtime(last_path)
+            except OSError:
+                gap = 0  # their first message here: nothing to be away from
+            os.makedirs(os.path.dirname(last_path), exist_ok=True)
+            open(last_path, "w").close()
+            if gap >= AWAY:
+                hours = int(gap // 3600) + 1
+                lines.append(f"The user was last here {ago(time.time() - gap)} ago. If this prompt is their own words, open your reply "
+                             "with `Since you left`, at most 6 short plain lines: what shipped or went live, what broke, what "
+                             f"needs them, what is running (from `tasks list --hours {hours}`). Then answer what they asked.")
         for tid in dict.fromkeys(t for t, _ in ENVELOPE.findall(ev.get("prompt", ""))):
             bt = c.execute("SELECT * FROM tasks WHERE id=?", (tid,)).fetchone()
             if bt:
                 lines.append(f"Board message for {task_line(c, bt)}. Run `tasks show {tid}` for its history. "
                              + f"If it says 'New task:', {tid} already exists: adopt it with tasks set, never tasks new.")
-        msg = "\n".join(lines)[:9000]
+        # Full task list on a session's first board prompt, then only what changed: re-sending every open task on every
+        # prompt (heartbeats and notifications included) was about a third of a lead's whole context.
+        # note: one small file per lead session, never pruned; prune by age if the folder ever matters.
+        seen_path = os.path.join(os.path.dirname(DB), "hook-seen", re.sub(r"[^\w-]", "_", sid))
+        try:
+            seen = json.load(open(seen_path))
+        except (OSError, ValueError):
+            seen = None
+        now = {t["id"]: t["updated"] for t in tasks}
+        more = f"{len(tasks)} open; `tasks list` shows them all"
+        old = [d["id"] for d in ds if time.time() - d["created"] > STALE]
+        if seen is None and old:  # once per lead session. The user answers in chat and never returns to an old question
+            lines.append("Open over 3 days: " + ", ".join(old) + ". The user does not go back to old questions, and the board folds "
+                         "them away. For each, now: if they answered it in chat or it no longer matters, close it (`tasks answer "
+                         "<id> \"<why>\" --state superseded`); if you still need it, ask them again in your reply, in one line.")
+        if seen is None:
+            lines += [f"Open tasks, newest first ({more}):"] if tasks else \
+                ["No open tasks yet. If work is already in flight, file it now (crew-board: When you start, step 3)."]
+            lines += ["- " + task_line(c, t) for t in tasks]
+        else:
+            changed = [t for t in tasks if seen.get(t["id"]) != t["updated"]]
+            gone = [i for i in seen if i not in now]
+            lines.append(f"Task changes since your last prompt ({more}):" if changed or gone
+                         else f"No task changes since your last prompt ({more}).")
+            lines += ["- " + task_line(c, t) for t in changed]
+            if gone:
+                lines.append("No longer open: " + ", ".join(gone))
+        msg = "\n".join(lines)
+        if len(msg) > 9000:
+            msg = msg[:9000] + "\n... (cut here; run `tasks list` for the rest)"
+        os.makedirs(os.path.dirname(seen_path), exist_ok=True)
+        with open(seen_path, "w") as f:
+            json.dump(now, f)
         print(json.dumps({"hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "additionalContext": msg}}))
     except Exception:
         return  # never break a prompt over the board

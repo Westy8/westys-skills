@@ -544,6 +544,12 @@ function overview($: $, el: El, t: Tick, v: View, s: Search, glyph: string | nul
   // what NEEDS YOU lists is not listed again in its repo below
   const waiting = new Set([...t.board.decisions.map(d => d.task_id), ...chores.map(x => x.id)])
   idW = Math.max(6, ...t.board.tasks.map(x => x.id.length))
+  // Newest question first (the store's order); one open longer than OLD_DAYS folds away below the fresh ones. the user
+  // answers in chat and never goes back to an old question, so it only buried the new ones. With no fresh one they show.
+  const isStale = (d: Decision) => now / 1000 - d.created > OLD_DAYS * 86400
+  const recent = t.board.decisions.filter(d => !isStale(d))
+  const fresh = recent.length ? recent : t.board.decisions
+  const stale = recent.length ? t.board.decisions.filter(isStale) : []
   return (
     <Box flexDirection="column">
       <Box justifyContent="space-between">
@@ -584,6 +590,24 @@ function overview($: $, el: El, t: Tick, v: View, s: Search, glyph: string | nul
       {v.picking && !s.q ? picker($, el, t, v.picking, width) : null /* last: it paints over the rows drawn before it */}
     </Box>
   )
+  function decisionRow(d: Decision) {
+    return line(
+      el,
+      {
+        key: `dec-row-${d.id}`,
+        press: () => openPane($, d.task_id),
+        tone: C.amber,
+        id: d.task_id,
+        title: d.question,
+        ...repoTag(el, repoOf(t, d.task_id), repoOfTask(t, d.task_id) ?? ''),
+        sub: <Text color={k(C.faint)} wrap="truncate-end">{d.id} · {d.options.length} options ›</Text>,
+        fresh: `new:${d.id}`,
+        over: w2 => rowEnd($, el, d.task_id, v, w2),
+      },
+      width - 2,
+      now,
+    )
+  }
   function overviewBody() {
     return (
     <Box flexDirection="column">
@@ -591,28 +615,24 @@ function overview($: $, el: El, t: Tick, v: View, s: Search, glyph: string | nul
         <Box flexDirection="column" marginTop={1}>
           {heading(el, 'NEEDS YOU', C.amber)}
           {settling.map(g => settledBox(el, g, t.board.repos.find(r => r.repo === repoOfTask(t, g.d.task_id)), now))}
-          {t.board.decisions.map((d, i) =>
+          {fresh.map((d, i) =>
             i === 0 ? (
               decisionBox($, el, d, true, t.board.repos.find(r => r.repo === repoOfTask(t, d.task_id)), now, v)
             ) : (
-              line(
-                el,
-                {
-                  key: `dec-row-${d.id}`,
-                  press: () => openPane($, d.task_id),
-                  tone: C.amber,
-                  id: d.task_id,
-                  title: d.question,
-                  ...repoTag(el, repoOf(t, d.task_id), repoOfTask(t, d.task_id) ?? ''),
-                  sub: <Text color={k(C.faint)} wrap="truncate-end">{d.id} · {d.options.length} options ›</Text>,
-                  fresh: `new:${d.id}`,
-                  over: w2 => rowEnd($, el, d.task_id, v, w2),
-                },
-                width - 2,
-                now,
-              )
+              decisionRow(d)
             ),
           )}
+          {stale.length > 0 && (
+            <Box key="old-box" hover={{ backgroundColor: C.raised }}>
+              <Button key="old-questions" plain hover={{ color: C.bright }} onPress={() => setView($, x => ({ ...x, openOld: !x.openOld }))}>
+                <Text color={k(C.faint)}>
+                  {'  '}
+                  {v.openOld ? '▾' : '▸'} {stale.length} older {stale.length === 1 ? 'question' : 'questions'} (over {OLD_DAYS} days)
+                </Text>
+              </Button>
+            </Box>
+          )}
+          {v.openOld && stale.map(d => decisionRow(d))}
           {chores.map(x =>
             line(
               el,
@@ -642,8 +662,14 @@ function overview($: $, el: El, t: Tick, v: View, s: Search, glyph: string | nul
       {shown.map(r => {
         const all = open.filter(x => x.repo === r.repo)
         const mine = all.filter(x => !waiting.has(x.id))
-        const active = mine.filter(x => x.status !== 'proposed')
-        const proposed = mine.filter(x => x.status === 'proposed')
+        // In motion stays in view; the rest folds: proposed (not started) and shipped (live or proven: working, with
+        // only a follow-up left). Shipped tasks can be most of a repo's rows. An unread result does not keep one in view: its
+        // lead already gave the user the result in chat, and nearly every shipped task has one they never opened here.
+        const quiet = (x: Card) => x.status === 'proposed' || x.status === 'live' || x.status === 'proven'
+        const active = mine.filter(x => !quiet(x))
+        const proposed = mine.filter(quiet)
+        const nShipped = proposed.filter(x => x.status !== 'proposed').length
+        const foldWords = [proposed.length - nShipped && `${proposed.length - nShipped} proposed`, nShipped && `${nShipped} shipped`].filter(Boolean).join(' · ')
         const unfolded = (v.openProposed ?? []).includes(r.repo)
         const finished = done.filter(x => x.repo === r.repo)
         const doneHere = openDone.includes(r.repo)
@@ -667,7 +693,7 @@ function overview($: $, el: El, t: Tick, v: View, s: Search, glyph: string | nul
                 >
                   <Text color={k(C.faint)}>
                     {'  '}
-                    {unfolded ? '▾' : '▸'} {proposed.length} proposed
+                    {unfolded ? '▾' : '▸'} {foldWords}
                   </Text>
                 </Button>
               </Box>
@@ -713,6 +739,7 @@ function overview($: $, el: El, t: Tick, v: View, s: Search, glyph: string | nul
 
 // ---- new tasks: ＋ on a repo, or the list of every repo (TAS-16, TAS-19, TAS-20) ----------------------------
 
+const OLD_DAYS = 3 // a question open longer folds under "N older questions" (the hook has its lead settle it)
 const PICK_ROWS = 8 // the list's height, whatever the filter leaves: opening or filtering it never resizes anything
 
 /** Moves the keyboard to a field this press just asked for: it can take it once the redraw has drawn it. */
@@ -1329,7 +1356,7 @@ function taskView($: $, el: El, t: Tick, d: Detail, v: View, rep: { path: string
   const content = faded(tabFade, () => (
     <Box flexDirection="column">
       {v.tab === 'result' && evidenceBox($, el, d, v)}
-      {v.tab === 'result' && resultTab($, el, d, rep, width)}
+      {v.tab === 'result' && resultTab($, el, d, rep, width, v)}
       {v.tab === 'conversation' && conversationTab($, el, d, now)}
       {v.tab === 'activity' && activityTab($, el, d)}
       {v.tab === 'files' && filesTab($, el, d)}
@@ -1368,14 +1395,15 @@ function taskView($: $, el: El, t: Tick, d: Detail, v: View, rep: { path: string
         <Box flexShrink={1}>{bar(el, d, now, 20)}</Box>
         <Box flexShrink={0} marginLeft={2}>{closeControls($, el, d, v)}</Box>
       </Box>
-      {crewBlock($, el, d, r)}
-      {tabBar($, el, v, files.length, open.length, width, now)}
-      {content}
+      {/* what they are asked comes first, above the crew, the tabs and the write-up */}
       {v.tab !== 'conversation' && decisions.length > 0 && (
         <Box flexDirection="column" marginTop={1}>
           {decisions}
         </Box>
       )}
+      {crewBlock($, el, d, r)}
+      {tabBar($, el, v, files.length, open.length, width, now)}
+      {content}
       <Box marginTop={1} borderStyle="round" borderColor={k(C.soft)} paddingX={1} flexDirection="column">
         <Button key="compose-focus" plain hotkey="m" onPress={() => void $.ui.focus({ requestId: 'tasks', key: `compose-${d.id}-${v.composer}` })}>
           <Text color={k(C.accent)} bold>Message the lead</Text>
@@ -1516,7 +1544,7 @@ function empty(el: El, mark: string, title: string, hint: string) {
   )
 }
 
-function resultTab($: $, el: El, d: Detail, rep: { path: string; text: string } | null, width: number) {
+function resultTab($: $, el: El, d: Detail, rep: { path: string; text: string } | null, width: number, v: View) {
   const { Box, Text, Button, Markdown } = el
   if (!d.report || rep?.path !== d.report) {
     return (
@@ -1532,6 +1560,9 @@ function resultTab($: $, el: El, d: Detail, rep: { path: string; text: string } 
   // TAS-13: the short version first, the report's own `In short` or else the lead's done line; the full report below it
   const sec = inShort(rep.text)
   let mds = 0 // the first Markdown keeps the key `report`
+  // The long write-up mostly goes unread. With a short version to show, the rest waits behind one line.
+  const short = Boolean(sec?.short || d.done)
+  const full = !short || v.fullReport === d.id
   return (
     <Box flexDirection="column">
       {sec?.short || d.done ? (
@@ -1550,7 +1581,14 @@ function resultTab($: $, el: El, d: Detail, rep: { path: string; text: string } 
         </Button>
         <Text color={k(C.faint)}>   {rep.path.split('/').pop()}</Text>
       </Box>
-      {layTables(sec ? sec.rest : rep.text, width - 2).map((p, i) =>
+      {short && (
+        <Box key="report-full-box" hover={{ backgroundColor: C.raised }}>
+          <Button key="report-full" plain hover={{ color: C.bright }} onPress={() => setView($, x => ({ ...x, fullReport: full ? null : d.id }))}>
+            <Text color={k(C.faint)}>{full ? '▾' : '▸'} Full report</Text>
+          </Button>
+        </Box>
+      )}
+      {full && layTables(sec ? sec.rest : rep.text, width - 2).map((p, i) =>
         'md' in p ? (
           <Markdown key={mds++ ? `report-${i}` : 'report'} text={p.md} onLinkPress={press} />
         ) : (

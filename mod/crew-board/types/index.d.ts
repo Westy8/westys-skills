@@ -110,8 +110,13 @@ export type View = {
   composer: number
   /** the Theme section at the bottom of the Overview is open */
   showTheme: boolean
-  /** repos whose proposed tasks are unfolded in the Overview (folded into "+ 6 proposed" otherwise) */
+  /** repos whose quiet tasks (proposed, and shipped: live or proven) are unfolded in the Overview (folded into
+   * "6 proposed · 4 shipped" otherwise) */
   openProposed: string[]
+  /** the "N older questions" fold in Needs you is open */
+  openOld?: boolean
+  /** the task whose full report is unfolded on its Result tab (only the short version shows otherwise) */
+  fullReport?: string | null
   /** repos whose Completed fold is open in the Overview (TAS-25; folded by default) */
   openDone: string[]
   /** how much of a task's history is shown, for that task only (any other task shows the first page); m / e: reach

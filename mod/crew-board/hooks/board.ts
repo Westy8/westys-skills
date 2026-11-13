@@ -4,7 +4,7 @@ import type { EngineInterface } from 'claude-code'
 import type { Detail, Hit, Message, Tab, Tick, View } from '../types'
 import { DUR, holds, idsIn, landing, linkPaths, PAGE, pill, ready, SEARCH, shownOf, titleOf, VIEW } from './logic'
 import { refreshLive } from './live'
-import { ghosts, paneOpened, settle, start, syncSpinner } from './motion'
+import { ghosts, isPaneOpen, paneOpened, settle, start, syncSpinner } from './motion'
 
 export const PANE = 'tasks'
 
@@ -83,6 +83,17 @@ async function myToken($: $, session: string): Promise<string> {
   const made = `${session}/${Math.random().toString(36).slice(2)}${(await $.clock.now()).toString(36)}`
   await update($, token, () => made)
   return made
+}
+
+/**
+ * The 3 s beat. Only a lead (it takes the user's messages) or an open board needs the store that often; every other
+ * session (workers, mostly: ~20 of them at once) reads it for its band on every fifth beat.
+ */
+let beats = 0
+export async function beat($: $): Promise<void> {
+  const t = await read($, tick) // none yet: it polls. A session that becomes the lead polls at its turn's end.
+  if (t && !t.me.is_lead && !isPaneOpen() && ++beats % 5) return
+  return poll($)
 }
 
 /** One poll: the board for the pane, and in the lead's session, this repo's queued messages submitted as prompts. */
